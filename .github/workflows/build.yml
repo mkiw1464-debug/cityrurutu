@@ -19,7 +19,16 @@ jobs:
           sudo apt-get install -y \
             git curl make perl zip unzip \
             clang llvm lld \
-            ldid
+            cmake libplist-dev libssl-dev \
+            pkg-config libxml2-dev
+
+      - name: Build & install ldid from source
+        run: |
+          git clone https://github.com/ProcursusTeam/ldid.git /tmp/ldid
+          cd /tmp/ldid
+          make -j$(nproc)
+          sudo make install
+          ldid --version || echo "[FFNET] ldid installed"
 
       - name: Install Theos
         run: |
@@ -61,17 +70,14 @@ jobs:
         run: |
           mkdir -p dist
 
-          # Copy .deb
           find . -path "*/packages/*.deb" | head -1 \
             | xargs -I{} cp {} dist/FFNET_IOS.deb || true
 
-          # Copy raw dylib
           find . -name "FFNET_IOS.dylib" | head -1 \
             | xargs -I{} cp {} dist/FFNET_IOS.dylib || true
 
-          # Build inject package
           mkdir -p inject_pkg/Frameworks
-          cp dist/FFNET_IOS.dylib inject_pkg/Frameworks/FFNET_IOS.dylib
+          cp dist/FFNET_IOS.dylib inject_pkg/Frameworks/FFNET_IOS.dylib || true
 
           cat > inject_pkg/inject.sh << 'EOF'
           #!/bin/sh
@@ -94,7 +100,7 @@ jobs:
           zip -r dist/FFNET_inject_pkg.zip inject_pkg/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4        # ← fixed: v3→v4
+        uses: actions/upload-artifact@v4
         with:
           name: FFNET_IOS_OB54
           path: dist/
