@@ -30,11 +30,36 @@ jobs:
           sudo make install
           ldid --version || echo "[FFNET] ldid installed"
 
-      - name: Install Theos
-        run: |
-          export THEOS=${{ github.workspace }}/theos
-          git clone --recursive https://github.com/theos/theos "$THEOS"
+    - name: Install Theos
+  run: |
+    export THEOS="${{ github.workspace }}/theos"
 
+    git clone --recursive https://github.com/theos/theos "$THEOS"
+
+    echo "[FFNET] Downloading iOS toolchain..."
+
+    curl -L \
+      "https://github.com/sbingner/llvm-project/releases/latest/download/linux-ios-arm64e-clang-toolchain.tar.lzma" \
+      -o toolchain.tar.lzma
+
+    TMP=$(mktemp -d)
+
+    tar --lzma -xf toolchain.tar.lzma -C "$TMP"
+
+    mkdir -p "$THEOS/toolchain/linux/iphone"
+
+    cp -R "$TMP"/ios-arm64e-clang-toolchain/* \
+      "$THEOS/toolchain/linux/iphone/"
+
+    rm -rf "$TMP" toolchain.tar.lzma
+
+    echo "[FFNET] Checking compiler..."
+    ls -la "$THEOS/toolchain/linux/iphone/bin"
+
+    test -x "$THEOS/toolchain/linux/iphone/bin/clang"
+    test -x "$THEOS/toolchain/linux/iphone/bin/clang++"
+
+    "$THEOS/toolchain/linux/iphone/bin/clang" --version
       - name: Download iOS SDK
         run: |
           export THEOS=${{ github.workspace }}/theos
