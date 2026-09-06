@@ -60,6 +60,7 @@ jobs:
     test -x "$THEOS/toolchain/linux/iphone/bin/clang++"
 
     "$THEOS/toolchain/linux/iphone/bin/clang" --version
+      
       - name: Download iOS SDK
         run: |
           export THEOS=${{ github.workspace }}/theos
