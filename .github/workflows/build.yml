@@ -11,28 +11,37 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git curl make perl zip unzip \
+            clang llvm lld \
+            ldid
 
       - name: Install Theos
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y git curl make perl zip unzip
-          
-          # Install Theos
-          git clone --recursive https://github.com/theos/theos $THEOS
-          
-          # Download iOS SDK
-          mkdir -p $THEOS/sdks
-          curl -L https://github.com/theos/sdks/releases/download/main/iPhoneOS16.5.sdk.tar.xz \
-               -o sdk.tar.xz
-          tar -xf sdk.tar.xz -C $THEOS/sdks
-          
-          # Download Substrate headers
-          curl -L https://github.com/theos/headers/archive/refs/heads/master.tar.gz \
-               -o headers.tar.gz
-          tar -xf headers.tar.gz -C $THEOS/include --strip-components=1
-        env:
-          THEOS: ${{ github.workspace }}/theos
+          export THEOS=${{ github.workspace }}/theos
+          git clone --recursive https://github.com/theos/theos "$THEOS"
+
+      - name: Download iOS SDK
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          mkdir -p "$THEOS/sdks"
+          curl -L \
+            "https://github.com/theos/sdks/releases/download/main/iPhoneOS16.5.sdk.tar.xz" \
+            -o sdk.tar.xz
+          tar -xf sdk.tar.xz -C "$THEOS/sdks"
+
+      - name: Download Substrate headers
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          curl -L \
+            "https://github.com/theos/headers/archive/refs/heads/master.tar.gz" \
+            -o headers.tar.gz
+          tar -xf headers.tar.gz -C "$THEOS/include" --strip-components=1
 
       - name: Build dylib
         run: |
@@ -41,47 +50,51 @@ jobs:
         env:
           THEOS: ${{ github.workspace }}/theos
 
-      - name: Sign dylib (ldid)
+      - name: Sign dylib with ldid
         run: |
-          sudo apt-get install -y ldid
           find . -name "*.dylib" | while read f; do
             ldid -Sentitlements.plist "$f"
-            echo "Signed: $f"
+            echo "[FFNET] Signed: $f"
           done
 
-      - name: Package for eSign/GBox/Feather
+      - name: Package artifacts
         run: |
           mkdir -p dist
-          # Copy built dylib
-          find . -path "*/packages/*.deb" | head -1 | xargs -I{} cp {} dist/FFNET_IOS.deb
-          # Also extract raw dylib for sideload apps
-          find . -name "FFNET_IOS.dylib" | head -1 | xargs -I{} cp {} dist/FFNET_IOS.dylib
-          
-          # Create inject-ready zip for esign/feather/ksign
+
+          # Copy .deb
+          find . -path "*/packages/*.deb" | head -1 \
+            | xargs -I{} cp {} dist/FFNET_IOS.deb || true
+
+          # Copy raw dylib
+          find . -name "FFNET_IOS.dylib" | head -1 \
+            | xargs -I{} cp {} dist/FFNET_IOS.dylib || true
+
+          # Build inject package
           mkdir -p inject_pkg/Frameworks
           cp dist/FFNET_IOS.dylib inject_pkg/Frameworks/FFNET_IOS.dylib
+
           cat > inject_pkg/inject.sh << 'EOF'
           #!/bin/sh
-          # esign/gbox/ksign inject script
           TARGET_IPA="FreeFire.ipa"
           DYLIB="FFNET_IOS.dylib"
           echo "[FFNET] Injecting $DYLIB into $TARGET_IPA"
           unzip -q "$TARGET_IPA" -d extracted
           cp "$DYLIB" extracted/Payload/FreeFire.app/Frameworks/
-          # Patch LC_LOAD_DYLIB entry
-          optool install -c load -p "@executable_path/Frameworks/FFNET_IOS.dylib" \
-              -t extracted/Payload/FreeFire.app/FreeFire
+          optool install -c load \
+            -p "@executable_path/Frameworks/FFNET_IOS.dylib" \
+            -t extracted/Payload/FreeFire.app/FreeFire
           cd extracted
           zip -qr "../FFNET_patched.ipa" .
           cd ..
           rm -rf extracted
           echo "[FFNET] Done → FFNET_patched.ipa"
           EOF
+
           chmod +x inject_pkg/inject.sh
           zip -r dist/FFNET_inject_pkg.zip inject_pkg/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4        # ← fixed: v3→v4
         with:
           name: FFNET_IOS_OB54
           path: dist/
