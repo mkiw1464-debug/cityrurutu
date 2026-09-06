@@ -1,19 +1,24 @@
-TARGET_ARCH    = arm64
-SDK            = $(THEOS)/sdks/iPhoneOS16.5.sdk
+TARGET_ARCH = arm64
+SDK = $(THEOS)/sdks/iPhoneOS16.5.sdk
+
 THEOS_DEVICE_IP =
 
-TWEAK_NAME     = FFNET_IOS
+TWEAK_NAME = FFNET_IOS
+
 FFNET_IOS_FILES = src/main.mm \
-                  src/Bypass/Bypass.mm \
-                  src/Bypass/AntiCheatBypass.mm \
-                  src/Bypass/IntegrityBypass.mm \
-                  src/Features/Aimbot.mm \
-                  src/Features/ESP.mm \
-                  src/Menu/Menu.mm
+    src/Bypass/Bypass.mm \
+    src/Bypass/AntiCheatBypass.mm \
+    src/Bypass/IntegrityBypass.mm \
+    src/Features/Aimbot.mm \
+    src/Features/ESP.mm \
+    src/Menu/Menu.mm
 
-FFNET_IOS_FRAMEWORKS  = UIKit CoreGraphics Foundation Security
-FFNET_IOS_LIBRARIES   = substrate
-FFNET_IOS_CFLAGS      = -fobjc-arc -O2 -std=c++17 \
-                         -Isrc/Utils -Isrc/Features -Isrc/Bypass -Isrc/Menu
+FFNET_IOS_FRAMEWORKS = UIKit CoreGraphics Foundation Security
+FFNET_IOS_LIBRARIES = substrate
 
-include $(THEOS)/makefiles/tweak.mk
+FFNET_IOS_CFLAGS = -fobjc-arc -O2 -std=c++17 \
+    -Isrc/Utils -Isrc/Features -Isrc/Bypass -Isrc/Menu
+
+include $(THEOS)/makefiles/common.mk
+
+include $(THEOS_MAKE_PATH)/tweak.mk
