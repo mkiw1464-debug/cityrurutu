@@ -20,5 +20,4 @@ FFNET_IOS_CFLAGS = -fobjc-arc -O2 -std=c++17 \
     -Isrc/Utils -Isrc/Features -Isrc/Bypass -Isrc/Menu
 
 include $(THEOS)/makefiles/common.mk
-
 include $(THEOS_MAKE_PATH)/tweak.mk
