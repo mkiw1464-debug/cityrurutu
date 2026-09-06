@@ -53,28 +53,51 @@ jobs:
           mkdir -p "$RUNNER_TEMP/libtinfo5"
           cd "$RUNNER_TEMP"
 
-          echo "Downloading libtinfo5..."
+          echo "Finding available libtinfo5 package..."
+
+          wget -qO- https://old-releases.ubuntu.com/ubuntu/pool/main/n/ncurses/ \
+            | grep -oE 'href="[^"]*libtinfo5_[^"]*_amd64\.deb"' \
+            | sed 's/href="//;s/"$//' \
+            | tail -n 1 > libtinfo5_name.txt
+
+          LIBTINFO_FILE="$(cat libtinfo5_name.txt)"
+
+          if [ -z "$LIBTINFO_FILE" ]; then
+            echo "ERROR: Could not find libtinfo5 package"
+            exit 1
+          fi
+
+          echo "Found: $LIBTINFO_FILE"
 
           wget -O libtinfo5.deb \
-            "http://security.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.2-0ubuntu2_amd64.deb" \
-            || wget -O libtinfo5.deb \
-            "http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo5_6.2-0ubuntu2_amd64.deb"
+            "https://old-releases.ubuntu.com/ubuntu/pool/main/n/ncurses/$LIBTINFO_FILE"
+
+          echo "Extracting libtinfo5..."
 
           dpkg-deb -x libtinfo5.deb "$RUNNER_TEMP/libtinfo5"
 
           LIBTINFO_DIR="$RUNNER_TEMP/libtinfo5/lib/x86_64-linux-gnu"
 
           if [ ! -f "$LIBTINFO_DIR/libtinfo.so.5" ]; then
-            echo "ERROR: libtinfo.so.5 was not found"
+            echo "ERROR: libtinfo.so.5 not found"
+
             find "$RUNNER_TEMP/libtinfo5" -type f
+
             exit 1
           fi
 
           echo "LD_LIBRARY_PATH=$LIBTINFO_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
-          echo "libtinfo5 installed:"
-          ls -l "$LIBTINFO_DIR/libtinfo.so.5"
+          echo
+          echo "========== libtinfo5 =========="
+          ls -lah "$LIBTINFO_DIR/libtinfo.so.5"
 
+          echo
+          echo "Checking ABI:"
+          strings "$LIBTINFO_DIR/libtinfo.so.5" \
+            | grep "NCURSES_TINFO" \
+            || true
+            
       - name: Build and install ldid
         shell: bash
         run: |
