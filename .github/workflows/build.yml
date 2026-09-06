@@ -1,3 +1,109 @@
+name: Build FFNET_IOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      SDK_URL: https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
+      TOOLCHAIN_URL: https://github.com/sbingner/llvm-project/releases/latest/download/linux-ios-arm64e-clang-toolchain.tar.lzma
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -eux
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            git \
+            curl \
+            wget \
+            make \
+            perl \
+            zip \
+            unzip \
+            clang \
+            llvm \
+            lld \
+            cmake \
+            pkg-config \
+            libplist-dev \
+            libssl-dev \
+            libxml2-dev \
+            fakeroot \
+            xz-utils \
+            libio-compress-lzma-perl \
+            ca-certificates \
+            dpkg-dev \
+            file
+
+      - name: Install libtinfo5
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$RUNNER_TEMP/libtinfo5"
+          cd "$RUNNER_TEMP"
+
+          echo "Finding available libtinfo5 package..."
+
+          wget -qO- \
+            https://old-releases.ubuntu.com/ubuntu/pool/main/n/ncurses/ \
+            | grep -oE 'href="[^"]*libtinfo5_[^"]*_amd64\.deb"' \
+            | sed 's/href="//;s/"$//' \
+            | tail -n 1 > libtinfo5_name.txt
+
+          LIBTINFO_FILE="$(cat libtinfo5_name.txt)"
+
+          if [ -z "$LIBTINFO_FILE" ]; then
+            echo "ERROR: Could not find libtinfo5 package"
+            exit 1
+          fi
+
+          echo "Found: $LIBTINFO_FILE"
+
+          wget -O libtinfo5.deb \
+            "https://old-releases.ubuntu.com/ubuntu/pool/main/n/ncurses/$LIBTINFO_FILE"
+
+          echo "Extracting libtinfo5..."
+
+          dpkg-deb -x \
+            libtinfo5.deb \
+            "$RUNNER_TEMP/libtinfo5"
+
+          LIBTINFO_DIR="$RUNNER_TEMP/libtinfo5/lib/x86_64-linux-gnu"
+
+          if [ ! -f "$LIBTINFO_DIR/libtinfo.so.5" ]; then
+            echo "ERROR: libtinfo.so.5 not found"
+            find "$RUNNER_TEMP/libtinfo5" -type f
+            exit 1
+          fi
+
+          echo "LD_LIBRARY_PATH=$LIBTINFO_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+          echo
+          echo "========== libtinfo5 =========="
+          ls -lah "$LIBTINFO_DIR/libtinfo.so.5"
+
+          echo
+          echo "Checking ABI:"
+
+          strings "$LIBTINFO_DIR/libtinfo.so.5" \
+            | grep "NCURSES_TINFO" \
+            || true
+
       - name: Build and install ldid
         shell: bash
         run: |
@@ -7,16 +113,21 @@
 
           rm -rf ldid
 
-          git clone --depth=1 \
+          git clone \
+            --depth=1 \
             https://github.com/ProcursusTeam/ldid.git \
             ldid
 
           cd ldid
 
           make -j"$(nproc)"
+
           sudo make install
 
+          echo "========== LDID =========="
+
           command -v ldid
+
           ldid -h || true
 
       - name: Install Theos
@@ -32,45 +143,97 @@
             https://github.com/theos/theos.git \
             "$THEOS"
 
-      - name: Install iOS Theos Toolchain
+          echo "========== THEOS =========="
+
+          test -d "$THEOS"
+
+          ls -la "$THEOS"
+
+      - name: Download iOS toolchain
         shell: bash
         run: |
           set -e
-
-          TOOLCHAIN_DIR="$THEOS/toolchain/linux/iphone"
-
-          mkdir -p "$TOOLCHAIN_DIR"
 
           cd "$RUNNER_TEMP"
 
           rm -f ios-toolchain.tar.lzma
 
-          wget -O ios-toolchain.tar.lzma \
-            https://github.com/sbingner/llvm-project/releases/latest/download/linux-ios-arm64e-clang-toolchain.tar.lzma
+          echo "Downloading iOS toolchain..."
 
-          echo "========== TOOLCHAIN ARCHIVE =========="
+          wget \
+            --progress=dot:giga \
+            -O ios-toolchain.tar.lzma \
+            "$TOOLCHAIN_URL"
 
-          tar --lzma -tf ios-toolchain.tar.lzma | head -30
+          test -s ios-toolchain.tar.lzma
 
-          echo "========== EXTRACT =========="
+          echo "========== TOOLCHAIN FILE =========="
 
-          rm -rf "$TOOLCHAIN_DIR"/*
+          ls -lh ios-toolchain.tar.lzma
+
+          echo
+          echo "========== ARCHIVE CONTENT =========="
 
           tar --lzma \
-            -xf ios-toolchain.tar.lzma \
+            -tf ios-toolchain.tar.lzma \
+            | head -50
+
+      - name: Install iOS toolchain
+        shell: bash
+        run: |
+          set -e
+
+          TOOLCHAIN_DIR="$THEOS/toolchain/linux/iphone"
+          ARCHIVE="$RUNNER_TEMP/ios-toolchain.tar.lzma"
+
+          rm -rf "$TOOLCHAIN_DIR"
+
+          mkdir -p "$TOOLCHAIN_DIR"
+
+          echo "Extracting iOS toolchain..."
+
+          tar \
+            --lzma \
+            -xf "$ARCHIVE" \
             -C "$TOOLCHAIN_DIR"
 
-          echo "========== TOOLCHAIN CONTENT =========="
+          echo
+          echo "========== TOOLCHAIN STRUCTURE =========="
 
-          find "$TOOLCHAIN_DIR" -maxdepth 3 -type f \
-            \( -name clang -o -name clang++ -o -name ld64 \) \
-            -print
+          find "$TOOLCHAIN_DIR" \
+            -maxdepth 4 \
+            -type f \
+            | head -100
 
-          echo "========== CLANG =========="
+          echo
+          echo "========== LOCATING CLANG =========="
 
-          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          CLANG_PATH="$(find "$TOOLCHAIN_DIR" \
+            -type f \
+            -path '*/bin/clang' \
+            | head -n 1)"
 
-          "$TOOLCHAIN_DIR/bin/clang" --version
+          if [ -z "$CLANG_PATH" ]; then
+            echo "ERROR: clang not found in iOS toolchain"
+
+            find "$TOOLCHAIN_DIR" \
+              -maxdepth 5 \
+              -type f \
+              | head -200
+
+            exit 1
+          fi
+
+          CLANG_BIN_DIR="$(dirname "$CLANG_PATH")"
+
+          echo "Found clang:"
+          echo "$CLANG_PATH"
+
+          echo "CLANG_BIN_DIR=$CLANG_BIN_DIR" >> "$GITHUB_ENV"
+
+          echo "THEOS_TOOLCHAIN_BIN=$CLANG_BIN_DIR" >> "$GITHUB_ENV"
+
+          echo "PATH=$CLANG_BIN_DIR:$PATH" >> "$GITHUB_ENV"
 
       - name: Install iPhoneOS 16.5 SDK
         shell: bash
@@ -85,48 +248,80 @@
 
           rm -f iPhoneOS16.5.sdk.tar.xz
 
-          wget -O iPhoneOS16.5.sdk.tar.xz \
-            https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
+          echo "Downloading iPhoneOS 16.5 SDK..."
 
-          tar -xJf \
+          wget \
+            --progress=dot:giga \
+            -O iPhoneOS16.5.sdk.tar.xz \
+            "$SDK_URL"
+
+          test -s iPhoneOS16.5.sdk.tar.xz
+
+          echo "Extracting SDK..."
+
+          tar \
+            -xJf \
             iPhoneOS16.5.sdk.tar.xz \
             -C "$SDK_DIR"
 
-          test -d "$SDK_DIR/iPhoneOS16.5.sdk"
+          if [ ! -d "$SDK_DIR/iPhoneOS16.5.sdk" ]; then
+            echo "ERROR: iPhoneOS16.5.sdk not found"
 
-          echo "SDK installed:"
-          ls -ld "$SDK_DIR/iPhoneOS16.5.sdk"
+            find "$SDK_DIR" \
+              -maxdepth 3 \
+              -type d
 
-      - name: Verify build environment
-        shell: bash
-        run: |
-          set -e
-
-          export PATH="$THEOS/toolchain/linux/iphone/bin:$PATH"
-
-          echo "========== ENVIRONMENT =========="
-
-          echo "THEOS=$THEOS"
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-
-          echo
-          echo "========== ldid =========="
-
-          command -v ldid
-
-          echo
-          echo "========== clang =========="
-
-          command -v clang
-          clang --version
+            exit 1
+          fi
 
           echo
           echo "========== SDK =========="
 
-          ls -ld "$THEOS/sdks/iPhoneOS16.5.sdk"
+          ls -ld "$SDK_DIR/iPhoneOS16.5.sdk"
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -e
+
+          export PATH="$CLANG_BIN_DIR:$PATH"
+
+          echo "========== ENVIRONMENT =========="
+
+          echo "THEOS=$THEOS"
+          echo "CLANG_BIN_DIR=$CLANG_BIN_DIR"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 
           echo
-          echo "========== libtinfo =========="
+          echo "========== CLANG =========="
+
+          command -v clang
+
+          clang --version
+
+          echo
+          echo "========== CLANG++ =========="
+
+          command -v clang++
+
+          clang++ --version
+
+          echo
+          echo "========== SDK =========="
+
+          xcrun_path="$THEOS/sdks/iPhoneOS16.5.sdk"
+
+          test -d "$xcrun_path"
+
+          echo "$xcrun_path"
+
+          echo
+          echo "========== LDID =========="
+
+          command -v ldid
+
+          echo
+          echo "========== LIBTINFO =========="
 
           find "$RUNNER_TEMP/libtinfo5" \
             -name "libtinfo.so*" \
@@ -138,9 +333,9 @@
         run: |
           set -e
 
-          export PATH="$THEOS/toolchain/linux/iphone/bin:$PATH"
+          export PATH="$CLANG_BIN_DIR:$THEOS/toolchain/linux/iphone/bin:$PATH"
 
-          echo "========== BUILD =========="
+          echo "========== START BUILD =========="
 
           make clean || true
 
@@ -149,12 +344,12 @@
             TARGET=iphone:clang:16.5:14.0 \
             -j"$(nproc)"
 
-      - name: Find dylib
+      - name: Locate FFNET_IOS.dylib
         shell: bash
         run: |
           set -e
 
-          echo "========== SEARCHING FOR DYLIB =========="
+          echo "========== ALL DYLIBS =========="
 
           find . \
             -type f \
@@ -164,7 +359,61 @@
           echo
           echo "========== FFNET_IOS.dylib =========="
 
-          find . \
+          DYLIB="$(find . \
             -type f \
             -name "FFNET_IOS.dylib" \
-            -print
+            | head -n 1)"
+
+          if [ -z "$DYLIB" ]; then
+            echo "ERROR: FFNET_IOS.dylib was not generated."
+
+            echo
+            echo "Build directory:"
+            find . \
+              -maxdepth 5 \
+              -type f \
+              | head -300
+
+            exit 1
+          fi
+
+          echo "FOUND:"
+          echo "$DYLIB"
+
+          mkdir -p artifacts
+
+          cp "$DYLIB" artifacts/FFNET_IOS.dylib
+
+          echo
+          echo "========== OUTPUT =========="
+
+          ls -lah artifacts/FFNET_IOS.dylib
+
+      - name: Copy Debian package
+        shell: bash
+        run: |
+          set -e
+
+          find . \
+            -type f \
+            -name "*.deb" \
+            -exec cp {} artifacts/ \; \
+            || true
+
+          echo "========== ARTIFACTS =========="
+
+          ls -lah artifacts
+
+      - name: Upload FFNET_IOS.dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFNET_IOS-dylib
+          path: artifacts/FFNET_IOS.dylib
+          if-no-files-found: error
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFNET_IOS-deb
+          path: artifacts/*.deb
+          if-no-files-found: ignore
